@@ -265,9 +265,14 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
 
             String doEmbedFile = handler.getAttributeValue( elem, "data-fs-embed-file" );
             if( "true".equals( doEmbedFile.toLowerCase() ) ) {
+                String fileName = new File( uri ).getName();
                 try {
+                    com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
+                    if (targetArea == null) {
+                        return;
+                    }
+
                     byte[] fileBytes = _sharedContext.getUac().getBinaryResource(uri);
-                    String fileName = new File( uri ).getName();
                     PdfFileSpecification fs;
                     fs = PdfFileSpecification.fileEmbedded(
                         _writer,
@@ -276,46 +281,29 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
                         fileBytes
                     );
                     
+                    String titleAttribute = handler.getAttributeValue( elem, "title" );
                     fs.addDescription( 
-                        handler.getAttributeValue( elem, "title" ),
+                        titleAttribute,
                         true
                     );
 
-                    _writer.addFileAttachment(fs);
-
-                    PdfTargetDictionary target = new PdfTargetDictionary(true);
-                    target.setEmbeddedFileName(fileName);
-                    
-                    PdfDestination dest = new PdfDestination(PdfDestination.FIT);
-                    dest.addFirst(new PdfNumber(1));
-
-                    PdfAction action = PdfAction.gotoEmbedded(
-                        null, //The attachment is in the current document
-                        target,
-                        dest,
-                        true //Open in new window
-                    );
-
-                    com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
-                    if (targetArea == null) {
-                        return;
-                    }
-
                     targetArea.setBorder(0);
                     targetArea.setBorderWidth(0);
-
-                    PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
-                            targetArea.getRight(), targetArea.getTop(), action);
-                    annot.put(PdfName.SUBTYPE, PdfName.LINK);
+                    
+                    PdfAnnotation annot = PdfAnnotation.createFileAttachment(
+                        _writer,
+                        targetArea,
+                        titleAttribute,
+                        fs
+                    );
                     annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
                     annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
                     _writer.addAnnotation(annot);
-                    return;
                 } catch (IOException ex) {
-                    ex.printStackTrace();
+                    XRLog.render(Level.INFO, "Could not embed file " + fileName );
                 }
             }
-            if (uri.length() > 1 && uri.charAt(0) == '#') { //internal jumplink
+			else if (uri.length() > 1 && uri.charAt(0) == '#') { //internal jumplink
                 String anchor = uri.substring(1);
                 Box target = _sharedContext.getBoxById(anchor);
                 if (target != null) {
