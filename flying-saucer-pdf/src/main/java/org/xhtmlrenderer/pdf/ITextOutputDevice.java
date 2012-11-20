@@ -88,12 +88,16 @@ import com.lowagie.text.pdf.PdfBorderArray;
 import com.lowagie.text.pdf.PdfBorderDictionary;
 import com.lowagie.text.pdf.PdfContentByte;
 import com.lowagie.text.pdf.PdfDestination;
+import com.lowagie.text.pdf.PdfFileSpecification;
 import com.lowagie.text.pdf.PdfImportedPage;
 import com.lowagie.text.pdf.PdfName;
+import com.lowagie.text.pdf.PdfNumber;
 import com.lowagie.text.pdf.PdfOutline;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.PdfTextArray;
 import com.lowagie.text.pdf.PdfWriter;
+import com.lowagie.text.pdf.collection.PdfTargetDictionary;
+import java.io.File;
 
 /**
  * This class is largely based on {@link com.lowagie.text.pdf.PdfGraphics2D}.
@@ -255,51 +259,106 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
         if (elem != null) {
             NamespaceHandler handler = _sharedContext.getNamespaceHandler();
             String uri = handler.getLinkUri(elem);
-            if (uri != null) {
-                if (uri.length() > 1 && uri.charAt(0) == '#') {
-                    String anchor = uri.substring(1);
-                    Box target = _sharedContext.getBoxById(anchor);
-                    if (target != null) {
-                        PdfDestination dest = createDestination(c, target);
+            if (uri == null) { 
+                return;
+            }
 
-                        PdfAction action = new PdfAction();
-                        if (!"".equals(handler.getAttributeValue(elem, "onclick"))) {
-                            action = PdfAction.javaScript(handler.getAttributeValue(elem, "onclick"), _writer);
-                        } else {
-                            action.put(PdfName.S, PdfName.GOTO);
-                            action.put(PdfName.D, dest);
-                        }
+            String doEmbedFile = handler.getAttributeValue( elem, "data-fs-embed-file" );
+            if( "true".equals( doEmbedFile.toLowerCase() ) ) {
+                try {
+                    byte[] fileBytes = _sharedContext.getUac().getBinaryResource(uri);
+                    String fileName = new File( uri ).getName();
+                    PdfFileSpecification fs;
+                    fs = PdfFileSpecification.fileEmbedded(
+                        _writer,
+                        null,
+                        fileName,
+                        fileBytes
+                    );
+                    
+                    fs.addDescription( 
+                        handler.getAttributeValue( elem, "title" ),
+                        true
+                    );
 
-                        com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
-                        if (targetArea == null) {
-                            return;
-                        }
+                    _writer.addFileAttachment(fs);
 
-                        targetArea.setBorder(0);
-                        targetArea.setBorderWidth(0);
+                    PdfTargetDictionary target = new PdfTargetDictionary(true);
+                    target.setEmbeddedFileName(fileName);
+                    
+                    PdfDestination dest = new PdfDestination(PdfDestination.FIT);
+                    dest.addFirst(new PdfNumber(1));
 
-                        PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
-                                targetArea.getRight(), targetArea.getTop(), action);
-                        annot.put(PdfName.SUBTYPE, PdfName.LINK);
-                        annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
-                        annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
-                        _writer.addAnnotation(annot);
-                    }
-                } else if (uri.indexOf("://") != -1) {
-                    PdfAction action = new PdfAction(uri);
+                    PdfAction action = PdfAction.gotoEmbedded(
+                        null, //The attachment is in the current document
+                        target,
+                        dest,
+                        true //Open in new window
+                    );
 
                     com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
                     if (targetArea == null) {
                         return;
                     }
-                    PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(), targetArea.getRight(),
-                            targetArea.getTop(), action);
-                    annot.put(PdfName.SUBTYPE, PdfName.LINK);
 
+                    targetArea.setBorder(0);
+                    targetArea.setBorderWidth(0);
+
+                    PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
+                            targetArea.getRight(), targetArea.getTop(), action);
+                    annot.put(PdfName.SUBTYPE, PdfName.LINK);
+                    annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
+                    annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
+                    _writer.addAnnotation(annot);
+                    return;
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
+            }
+            if (uri.length() > 1 && uri.charAt(0) == '#') { //internal jumplink
+                String anchor = uri.substring(1);
+                Box target = _sharedContext.getBoxById(anchor);
+                if (target != null) {
+                    PdfDestination dest = createDestination(c, target);
+
+                    PdfAction action = new PdfAction();
+                    if (!"".equals(handler.getAttributeValue(elem, "onclick"))) {
+                        action = PdfAction.javaScript(handler.getAttributeValue(elem, "onclick"), _writer);
+                    } else {
+                        action.put(PdfName.S, PdfName.GOTO);
+                        action.put(PdfName.D, dest);
+                    }
+
+                    com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
+                    if (targetArea == null) {
+                        return;
+                    }
+
+                    targetArea.setBorder(0);
+                    targetArea.setBorderWidth(0);
+
+                    PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
+                            targetArea.getRight(), targetArea.getTop(), action);
+                    annot.put(PdfName.SUBTYPE, PdfName.LINK);
                     annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
                     annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
                     _writer.addAnnotation(annot);
                 }
+            }
+            else if (uri.indexOf("://") != -1) { //external link
+                PdfAction action = new PdfAction(uri);
+
+                com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
+                if (targetArea == null) {
+                    return;
+                }
+                PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(), targetArea.getRight(),
+                        targetArea.getTop(), action);
+                annot.put(PdfName.SUBTYPE, PdfName.LINK);
+
+                annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
+                annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
+                _writer.addAnnotation(annot);
             }
         }
     }
