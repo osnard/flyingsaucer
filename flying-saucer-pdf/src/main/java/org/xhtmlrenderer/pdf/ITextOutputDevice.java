@@ -91,12 +91,10 @@ import com.lowagie.text.pdf.PdfDestination;
 import com.lowagie.text.pdf.PdfFileSpecification;
 import com.lowagie.text.pdf.PdfImportedPage;
 import com.lowagie.text.pdf.PdfName;
-import com.lowagie.text.pdf.PdfNumber;
 import com.lowagie.text.pdf.PdfOutline;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.PdfTextArray;
 import com.lowagie.text.pdf.PdfWriter;
-import com.lowagie.text.pdf.collection.PdfTargetDictionary;
 import java.io.File;
 
 /**
@@ -145,6 +143,8 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
     private List _bookmarks = new ArrayList();
 
     private List _metadata = new ArrayList();
+    
+    private List _attachments = new ArrayList(); //Document level attachments
 
     private Box _root;
 
@@ -256,98 +256,95 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
 
     private void processLink(RenderingContext c, Box box) {
         Element elem = box.getElement();
-        if (elem != null) {
-            NamespaceHandler handler = _sharedContext.getNamespaceHandler();
-            String uri = handler.getLinkUri(elem);
-            if (uri == null) { 
+        if (elem == null) {
+            return;
+        }
+
+        NamespaceHandler handler = _sharedContext.getNamespaceHandler();
+        String uri = handler.getLinkUri(elem);
+        if (uri == null) { 
+            return;
+        }
+
+        String doEmbedFile = handler.getAttributeValue( elem, "data-fs-embed-file" );
+        if( "true".equals( doEmbedFile.toLowerCase() ) ) {
+            String fileName = new File( uri ).getName();
+            com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
+            if (targetArea == null) {
                 return;
             }
 
-            String doEmbedFile = handler.getAttributeValue( elem, "data-fs-embed-file" );
-            if( "true".equals( doEmbedFile.toLowerCase() ) ) {
-                String fileName = new File( uri ).getName();
-                try {
-                    com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
-                    if (targetArea == null) {
-                        return;
-                    }
-
+            try {
+                if( !_attachments.contains( fileName ) ) {
                     byte[] fileBytes = _sharedContext.getUac().getBinaryResource(uri);
-                    PdfFileSpecification fs;
-                    fs = PdfFileSpecification.fileEmbedded(
-                        _writer,
-                        null,
-                        fileName,
-                        fileBytes
-                    );
-                    
-                    String titleAttribute = handler.getAttributeValue( elem, "title" );
-                    fs.addDescription( 
-                        titleAttribute,
-                        true
-                    );
+                    PdfFileSpecification fs = PdfFileSpecification.fileEmbedded( _writer, null, fileName, fileBytes );
+                    fs.addDescription( fileName, true );
 
-                    targetArea.setBorder(0);
-                    targetArea.setBorderWidth(0);
-                    
-                    PdfAnnotation annot = PdfAnnotation.createFileAttachment(
-                        _writer,
-                        targetArea,
-                        titleAttribute,
-                        fs
-                    );
-                    annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
-                    annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
-                    _writer.addAnnotation(annot);
-                } catch (IOException ex) {
-                    XRLog.render(Level.INFO, "Could not embed file " + fileName );
+                    _writer.addFileAttachment(fs);
+                    _attachments.add( fileName );
                 }
+
+                targetArea.setBorder(0);
+                targetArea.setBorderWidth(0);
+
+                PdfAction action = PdfAction.javaScript(
+                    "this.exportDataObject({cName:\""+fileName+"\", nLaunch:1});",
+                    _writer
+                );
+                PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
+                        targetArea.getRight(), targetArea.getTop(), action);
+                annot.put(PdfName.SUBTYPE, PdfName.LINK);
+                annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
+                annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
+                _writer.addAnnotation(annot);
+            } catch (IOException ex) {
+                XRLog.render(Level.INFO, "Could not embed file " + fileName + " using URI " + uri );
             }
-			else if (uri.length() > 1 && uri.charAt(0) == '#') { //internal jumplink
-                String anchor = uri.substring(1);
-                Box target = _sharedContext.getBoxById(anchor);
-                if (target != null) {
-                    PdfDestination dest = createDestination(c, target);
+        }
+        else if (uri.length() > 1 && uri.charAt(0) == '#') { //internal jumplink
+            String anchor = uri.substring(1);
+            Box target = _sharedContext.getBoxById(anchor);
+            if (target != null) {
+                PdfDestination dest = createDestination(c, target);
 
-                    PdfAction action = new PdfAction();
-                    if (!"".equals(handler.getAttributeValue(elem, "onclick"))) {
-                        action = PdfAction.javaScript(handler.getAttributeValue(elem, "onclick"), _writer);
-                    } else {
-                        action.put(PdfName.S, PdfName.GOTO);
-                        action.put(PdfName.D, dest);
-                    }
-
-                    com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
-                    if (targetArea == null) {
-                        return;
-                    }
-
-                    targetArea.setBorder(0);
-                    targetArea.setBorderWidth(0);
-
-                    PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
-                            targetArea.getRight(), targetArea.getTop(), action);
-                    annot.put(PdfName.SUBTYPE, PdfName.LINK);
-                    annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
-                    annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
-                    _writer.addAnnotation(annot);
+                PdfAction action = new PdfAction();
+                if (!"".equals(handler.getAttributeValue(elem, "onclick"))) {
+                    action = PdfAction.javaScript(handler.getAttributeValue(elem, "onclick"), _writer);
+                } else {
+                    action.put(PdfName.S, PdfName.GOTO);
+                    action.put(PdfName.D, dest);
                 }
-            }
-            else if (uri.indexOf("://") != -1) { //external link
-                PdfAction action = new PdfAction(uri);
 
                 com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
                 if (targetArea == null) {
                     return;
                 }
-                PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(), targetArea.getRight(),
-                        targetArea.getTop(), action);
-                annot.put(PdfName.SUBTYPE, PdfName.LINK);
 
+                targetArea.setBorder(0);
+                targetArea.setBorderWidth(0);
+
+                PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
+                        targetArea.getRight(), targetArea.getTop(), action);
+                annot.put(PdfName.SUBTYPE, PdfName.LINK);
                 annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
                 annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
                 _writer.addAnnotation(annot);
             }
+        }
+        else if (uri.indexOf("://") != -1) { //external link
+            PdfAction action = new PdfAction(uri);
+
+            com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
+            if (targetArea == null) {
+                return;
+            }
+            PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(), targetArea.getRight(),
+                    targetArea.getTop(), action);
+            annot.put(PdfName.SUBTYPE, PdfName.LINK);
+
+            annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
+            annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
+            _writer.addAnnotation(annot);
         }
     }
 
