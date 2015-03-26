@@ -243,6 +243,18 @@ public final class CSSName implements Comparable {
     /**
      * Unique CSSName instance for CSS2 property.
      */
+    public final static CSSName FS_DYNAMIC_AUTO_WIDTH =
+            addProperty(
+                    "-fs-dynamic-auto-width",
+                    PRIMITIVE,
+                    "static",
+                    NOT_INHERITED,
+                    new PrimitivePropertyBuilders.FSDynamicAutoWidth()
+            );
+
+    /**
+     * Unique CSSName instance for CSS2 property.
+     */
     public final static CSSName FS_FONT_METRIC_SRC =
             addProperty(
                     "-fs-font-metric-src",
@@ -371,6 +383,18 @@ public final class CSSName implements Comparable {
                 NOT_INHERITED,
                 new PrimitivePropertyBuilders.FSFitImagesToWidth()
         );
+
+    /**
+     * Used to control creation of named destinations for boxes having the id attribute set.
+     */
+    public final static CSSName FS_NAMED_DESTINATION =
+            addProperty(
+                    "-fs-named-destination",
+                    PRIMITIVE,
+                    "none",
+                    NOT_INHERITED,
+                    new PrimitivePropertyBuilders.FSNamedDestination()
+            );
 
     /**
      * Unique CSSName instance for CSS2 property.
@@ -902,6 +926,18 @@ public final class CSSName implements Comparable {
             );
 
     /**
+     * Used for controlling tab size in pre tags. See http://dev.w3.org/csswg/css3-text/#tab-size
+     */
+    public final static CSSName TAB_SIZE =
+            addProperty(
+                    "tab-size",
+                    PRIMITIVE,
+                    "8",
+                    INHERITS,
+                    new PrimitivePropertyBuilders.TabSize()
+                    );
+
+    /**
      * Unique CSSName instance for CSS2 property.
      */
     public final static CSSName TABLE_LAYOUT =
@@ -1221,6 +1257,58 @@ public final class CSSName implements Comparable {
             );
 
     /**
+     * Unique CSSName instance for CSS3 property.
+     */
+    public final static CSSName BORDER_TOP_LEFT_RADIUS =
+            addProperty(
+                    "border-top-left-radius",
+                    PRIMITIVE,
+                    "0 0",
+                    NOT_INHERITED,
+                    true,
+                    new PrimitivePropertyBuilders.BorderTopLeftRadius()
+            );
+
+    /**
+     * Unique CSSName instance for CSS3 property.
+     */
+    public final static CSSName BORDER_TOP_RIGHT_RADIUS =
+            addProperty(
+                    "border-top-right-radius",
+                    PRIMITIVE,
+                    "0 0",
+                    NOT_INHERITED,
+                    true,
+                    new PrimitivePropertyBuilders.BorderTopRightRadius()
+            );
+
+    /**
+     * Unique CSSName instance for CSS3 property.
+     */
+    public final static CSSName BORDER_BOTTOM_RIGHT_RADIUS =
+            addProperty(
+                    "border-bottom-right-radius",
+                    PRIMITIVE,
+                    "0 0",
+                    NOT_INHERITED,
+                    true,
+                    new PrimitivePropertyBuilders.BorderBottomRightRadius()
+            );
+
+    /**
+     * Unique CSSName instance for CSS3 property.
+     */
+    public final static CSSName BORDER_BOTTOM_LEFT_RADIUS =
+            addProperty(
+                    "border-bottom-left-radius",
+                    PRIMITIVE,
+                    "0 0",
+                    NOT_INHERITED,
+                    true,
+                    new PrimitivePropertyBuilders.BorderBottomLeftRadius()
+            );
+    
+    /**
      * Unique CSSName instance for CSS2 property.
      */
     public final static CSSName MARGIN_TOP =
@@ -1320,6 +1408,20 @@ public final class CSSName implements Comparable {
                     "transparent none repeat scroll 0% 0%",
                     NOT_INHERITED,
                     new BackgroundPropertyBuilder()
+            );
+    
+
+    /**
+     * Unique CSSName instance for CSS3 property.
+     */
+    public final static CSSName BORDER_RADIUS_SHORTHAND =
+            addProperty(
+                    "border-radius",
+                    SHORTHAND,
+                    "0px",
+                    NOT_INHERITED,
+                    true,
+                    new OneToFourPropertyBuilders.BorderRadius()
             );
 
     /**

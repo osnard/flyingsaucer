@@ -1,6 +1,6 @@
 /*
  * Breaker.java
- * Copyright (c) 2004, 2005 Torbjoern Gannholm, 
+ * Copyright (c) 2004, 2005 Torbjoern Gannholm,
  * Copyright (c) 2005 Wisconsin Court System
  *
  * This program is free software; you can redistribute it and/or
@@ -20,12 +20,14 @@
  */
 package org.xhtmlrenderer.layout;
 
+import java.text.BreakIterator;
+
 import org.xhtmlrenderer.css.constants.IdentValue;
 import org.xhtmlrenderer.css.style.CalculatedStyle;
 import org.xhtmlrenderer.render.FSFont;
 
 /**
- * A utility class that scans the text of a single inline box, looking for the 
+ * A utility class that scans the text of a single inline box, looking for the
  * next break point.
  * @author Torbjoern Gannholm
  */
@@ -37,39 +39,37 @@ public class Breaker {
         context.setEnd(getFirstLetterEnd(context.getMaster(), context.getStart()));
         context.setWidth(c.getTextRenderer().getWidth(
                 c.getFontContext(), font, context.getCalculatedSubstring()));
-        
+
         if (context.getWidth() > avail) {
             context.setNeedsNewLine(true);
             context.setUnbreakable(true);
         }
     }
-    
+
     private static int getFirstLetterEnd(String text, int start) {
-        int i = start;
-        while (i < text.length()) {
-            char c = text.charAt(i);
-            int type = Character.getType(c);
-            if (type == Character.START_PUNCTUATION || 
-                    type == Character.END_PUNCTUATION ||
-                    type == Character.INITIAL_QUOTE_PUNCTUATION ||
-                    type == Character.FINAL_QUOTE_PUNCTUATION ||
-                    type == Character.OTHER_PUNCTUATION) {
-                i++;
-            } else {
-                break;
+        boolean letterFound = false;
+        int end = text.length();
+        char currentChar;
+        for ( int i = start; i < end; i++ ) {
+            currentChar = text.charAt(i);
+            if (!TextUtil.isFirstLetterSeparatorChar(currentChar)) {
+                if (letterFound) {
+                    return i;
+                } else {
+                    letterFound = true;
+                }
             }
         }
-        if (i < text.length()) {
-            i++;
-        }
-        return i;
-    }    
-    
-    public static void breakText(LayoutContext c, 
+        return end;
+    }
+
+    public static void breakText(LayoutContext c,
             LineBreakContext context, int avail, CalculatedStyle style) {
         FSFont font = style.getFSFont(c);
         IdentValue whitespace = style.getWhitespace();
-        
+        IdentValue wordwrap = style.getWordWrap();
+        boolean breakWord = (wordwrap == IdentValue.BREAK_WORD);
+
         // ====== handle nowrap
         if (whitespace == IdentValue.NOWRAP) {
         	context.setEnd(context.getLast());
@@ -92,27 +92,28 @@ public class Breaker {
             } else if (whitespace == IdentValue.PRE) {
             	context.setEnd(context.getLast());
                 context.setWidth(c.getTextRenderer().getWidth(
-                        c.getFontContext(), font, context.getCalculatedSubstring()));  
+                        c.getFontContext(), font, context.getCalculatedSubstring()));
             }
         }
 
         //check if we may wrap
-        if (whitespace == IdentValue.PRE || 
+        if (whitespace == IdentValue.PRE ||
                 (context.isNeedsNewLine() && context.getWidth() <= avail)) {
             return;
         }
-        
+
         context.setEndsOnNL(false);
-        doBreakText(c, context, avail, style, false);
+        doBreakText(c, context, avail, style, breakWord);
     }
-    
+
     private static void doBreakText(LayoutContext c,
             LineBreakContext context, int avail, CalculatedStyle style,
             boolean tryToBreakAnywhere) {
         FSFont font = style.getFSFont(c);
         String currentString = context.getStartSubstring();
+        BreakIterator iterator = getWordStream(currentString);
         int left = 0;
-        int right = tryToBreakAnywhere ? 1 : currentString.indexOf(WhitespaceStripper.SPACE, left + 1);
+        int right = tryToBreakAnywhere ? 1 : iterator.next();
         int lastWrap = 0;
         int graphicsLength = 0;
         int lastGraphicsLength = 0;
@@ -126,8 +127,8 @@ public class Breaker {
             if ( tryToBreakAnywhere ) {
                 right = ( right + 1 ) % currentString.length();
             }
-            else { // break only on whitespace
-                right = currentString.indexOf(WhitespaceStripper.SPACE, left + 1);
+            else { // break relies on BreakIterator
+                right = iterator.next();
             }
         }
 
@@ -145,7 +146,7 @@ public class Breaker {
             //It fit!
             return;
         }
-        
+
         context.setNeedsNewLine(true);
         if ( lastWrap == 0 && style.getWordWrap() == IdentValue.BREAK_WORD ) {
             if ( ! tryToBreakAnywhere ) {
@@ -161,10 +162,10 @@ public class Breaker {
             if (left == 0) {
                 left = currentString.length();
             }
-            
+
             context.setEnd(context.getStart() + left);
             context.setUnbreakable(true);
-            
+
             if (left == currentString.length()) {
                 context.setWidth(c.getTextRenderer().getWidth(
                         c.getFontContext(), font, context.getCalculatedSubstring()));
@@ -175,5 +176,10 @@ public class Breaker {
         return;
     }
 
-}
+	public static BreakIterator getWordStream(String s) {
+		BreakIterator i = BreakIterator.getWordInstance();
+		i.setText(s);
+		return i;
+	}
 
+}

@@ -831,17 +831,18 @@ public class InlineBoxing {
 
     private static InlineText layoutText(LayoutContext c, CalculatedStyle style, int remainingWidth,
                                          LineBreakContext lbContext, boolean needFirstLetter) {
-        InlineText result = null;
-
-        result = new InlineText();
-        result.setMasterText(lbContext.getMaster());
-        result.setTextNode(lbContext.getTextNode());
+        InlineText result = new InlineText();
+        String masterText = lbContext.getMaster();
         if (needFirstLetter) {
+            masterText = TextUtil.transformFirstLetterText(masterText, style);
+            lbContext.setMaster(masterText);
             Breaker.breakFirstLetter(c, lbContext, remainingWidth, style);
         } else {
             Breaker.breakText(c, lbContext, remainingWidth, style);
         }
 
+        result.setMasterText(masterText);
+        result.setTextNode(lbContext.getTextNode());
         result.setSubstring(lbContext.getStart(), lbContext.getEnd());
         result.setWidth(lbContext.getWidth());
 
@@ -879,9 +880,13 @@ public class InlineBoxing {
         if ((! line.isContainsContent() || zeroWidthInlineBlock) &&
                 lbContext.getStartSubstring().startsWith(WhitespaceStripper.SPACE)) {
             IdentValue whitespace = style.getWhitespace();
-            if ( (whitespace == IdentValue.NORMAL || whitespace == IdentValue.NOWRAP
-                        || whitespace == IdentValue.PRE_LINE) ||
-                    ( whitespace == IdentValue.PRE_WRAP && ! lbContext.isEndsOnNL())) {
+            if (whitespace == IdentValue.NORMAL
+                    || whitespace == IdentValue.NOWRAP
+                    || whitespace == IdentValue.PRE_LINE
+                    || (whitespace == IdentValue.PRE_WRAP
+                        && lbContext.getStart() > 0
+                        && (lbContext.getMaster().length() > lbContext.getStart() - 1)
+                        && lbContext.getMaster().charAt(lbContext.getStart() - 1) != WhitespaceStripper.EOLC)) {
                 return true;
             }
         }

@@ -27,6 +27,8 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -38,8 +40,8 @@ import org.xhtmlrenderer.extend.UserAgentCallback;
 import org.xhtmlrenderer.resource.CSSResource;
 import org.xhtmlrenderer.resource.ImageResource;
 import org.xhtmlrenderer.resource.XMLResource;
+import org.xhtmlrenderer.util.ImageUtil;
 import org.xhtmlrenderer.util.XRLog;
-
 
 /**
  * <p>NaiveUserAgent is a simple implementation of {@link UserAgentCallback} which places no restrictions on what
@@ -59,57 +61,56 @@ import org.xhtmlrenderer.util.XRLog;
  * @author Torbjoern Gannholm
  */
 public class NaiveUserAgent implements UserAgentCallback, DocumentListener {
-	private static final int DEFAULT_IMAGE_CACHE_SIZE = 16;
 
-	/**
-	 * a (simple) LRU cache
-	 */
-	protected LinkedHashMap _imageCache;
-	private int _imageCacheCapacity;
-	private String _baseURL;
-
+    private static final int DEFAULT_IMAGE_CACHE_SIZE = 16;
+    /**
+     * a (simple) LRU cache
+     */
+    protected LinkedHashMap _imageCache;
+    private int _imageCacheCapacity;
+    private String _baseURL;
 
     /**
      * Creates a new instance of NaiveUserAgent with a max image cache of 16 images.
      */
     public NaiveUserAgent() {
-		this(DEFAULT_IMAGE_CACHE_SIZE);
-	}
+        this(DEFAULT_IMAGE_CACHE_SIZE);
+    }
 
-	/**
-	 * Creates a new NaiveUserAgent with a cache of a specific size.
-	 *
-	 * @param imgCacheSize Number of images to hold in cache before LRU images are released.
-	 */
-	public NaiveUserAgent(final int imgCacheSize) {
-		this._imageCacheCapacity = imgCacheSize;
+    /**
+     * Creates a new NaiveUserAgent with a cache of a specific size.
+     *
+     * @param imgCacheSize Number of images to hold in cache before LRU images are released.
+     */
+    public NaiveUserAgent(final int imgCacheSize) {
+        this._imageCacheCapacity = imgCacheSize;
 
-		// note we do *not* override removeEldestEntry() here--users of this class must call shrinkImageCache().
-		// that's because we don't know when is a good time to flush the cache
-		this._imageCache = new java.util.LinkedHashMap(_imageCacheCapacity, 0.75f, true);
-	}
+        // note we do *not* override removeEldestEntry() here--users of this class must call shrinkImageCache().
+        // that's because we don't know when is a good time to flush the cache
+        this._imageCache = new java.util.LinkedHashMap(_imageCacheCapacity, 0.75f, true);
+    }
 
-	/**
-	 * If the image cache has more items than the limit specified for this class, the least-recently used will
-	 * be dropped from cache until it reaches the desired size.
-	 */
-	public void shrinkImageCache() {
-		int ovr = _imageCache.size() - _imageCacheCapacity;
-		Iterator it = _imageCache.keySet().iterator();
-		while (it.hasNext() && ovr-- > 0) {
-			it.next();
-			it.remove();
-		}
-	}
+    /**
+     * If the image cache has more items than the limit specified for this class, the least-recently used will
+     * be dropped from cache until it reaches the desired size.
+     */
+    public void shrinkImageCache() {
+        int ovr = _imageCache.size() - _imageCacheCapacity;
+        Iterator it = _imageCache.keySet().iterator();
+        while (it.hasNext() && ovr-- > 0) {
+            it.next();
+            it.remove();
+        }
+    }
 
-	/**
-	 * Empties the image cache entirely.
-	 */
-	public void clearImageCache() {
-		_imageCache.clear();
-	}
+    /**
+     * Empties the image cache entirely.
+     */
+    public void clearImageCache() {
+        _imageCache.clear();
+    }
 
-	/**
+    /**
      * Gets a Reader for the resource identified
      *
      * @param uri PARAM
@@ -131,90 +132,97 @@ public class NaiveUserAgent implements UserAgentCallback, DocumentListener {
         return is;
     }
 
-	/**
-	 * Retrieves the CSS located at the given URI.  It's assumed the URI does point to a CSS file--the URI will
-	 * be accessed (using java.io or java.net), opened, read and then passed into the CSS parser.
-	 * The result is packed up into an CSSResource for later consumption.
-	 *
-	 * @param uri Location of the CSS source.
-	 * @return A CSSResource containing the parsed CSS.
-	 */
-	public CSSResource getCSSResource(String uri) {
+    /**
+     * Retrieves the CSS located at the given URI.  It's assumed the URI does point to a CSS file--the URI will
+     * be accessed (using java.io or java.net), opened, read and then passed into the CSS parser.
+     * The result is packed up into an CSSResource for later consumption.
+     *
+     * @param uri Location of the CSS source.
+     * @return A CSSResource containing the parsed CSS.
+     */
+    public CSSResource getCSSResource(String uri) {
         return new CSSResource(resolveAndOpenStream(uri));
     }
 
-	/**
-	 * Retrieves the image located at the given URI. It's assumed the URI does point to an image--the URI will
-	 * be accessed (using java.io or java.net), opened, read and then passed into the JDK image-parsing routines.
-	 * The result is packed up into an ImageResource for later consumption.
-	 *
-	 * @param uri Location of the image source.
-	 * @return An ImageResource containing the image.
-	 */
-	public ImageResource getImageResource(String uri) {
+    /**
+     * Retrieves the image located at the given URI. It's assumed the URI does point to an image--the URI will
+     * be accessed (using java.io or java.net), opened, read and then passed into the JDK image-parsing routines.
+     * The result is packed up into an ImageResource for later consumption.
+     *
+     * @param uri Location of the image source.
+     * @return An ImageResource containing the image.
+     */
+    public ImageResource getImageResource(String uri) {
         ImageResource ir;
-        uri = resolveURI(uri);
-        ir = (ImageResource) _imageCache.get(uri);
-        //TODO: check that cached image is still valid
-        if (ir == null) {
-            InputStream is = resolveAndOpenStream(uri);
-            if (is != null) {
-                try {
-                    BufferedImage img = ImageIO.read(is);
-                    if (img == null) {
-                        throw new IOException("ImageIO.read() returned null");
-                    }
-                    ir = createImageResource(uri, img);
-                    _imageCache.put(uri, ir);
-                } catch (FileNotFoundException e) {
-                    XRLog.exception("Can't read image file; image at URI '" + uri + "' not found");
-                } catch (IOException e) {
-                    XRLog.exception("Can't read image file; unexpected problem for URI '" + uri + "'", e);
-                } finally {
+        if (ImageUtil.isEmbeddedBase64Image(uri)) {
+            BufferedImage image = ImageUtil.loadEmbeddedBase64Image(uri);
+            ir = createImageResource(null, image);
+        } else {
+            uri = resolveURI(uri);
+            ir = (ImageResource) _imageCache.get(uri);
+            //TODO: check that cached image is still valid
+            if (ir == null) {
+                InputStream is = resolveAndOpenStream(uri);
+                if (is != null) {
                     try {
-                        is.close();
+                        BufferedImage img = ImageIO.read(is);
+                        if (img == null) {
+                            throw new IOException("ImageIO.read() returned null");
+                        }
+                        ir = createImageResource(uri, img);
+                        _imageCache.put(uri, ir);
+                    } catch (FileNotFoundException e) {
+                        XRLog.exception("Can't read image file; image at URI '" + uri + "' not found");
                     } catch (IOException e) {
-                        // ignore
+                        XRLog.exception("Can't read image file; unexpected problem for URI '" + uri + "'", e);
+                    } finally {
+                        try {
+                            is.close();
+                        } catch (IOException e) {
+                            // ignore
+                        }
                     }
                 }
             }
-        }
-        if (ir == null) {
-            ir = createImageResource(uri, null);
+            if (ir == null) {
+                ir = createImageResource(uri, null);
+            }
         }
         return ir;
     }
 
-	/**
-	 * Factory method to generate ImageResources from a given Image. May be overridden in subclass.
+    /**
+     * Factory method to generate ImageResources from a given Image. May be overridden in subclass. 
+     *
+     * @param uri The URI for the image, resolved to an absolute URI.
+     * @param img The image to package; may be null (for example, if image could not be loaded).
+     *
+     * @return An ImageResource containing the image.
+     */
+    protected ImageResource createImageResource(String uri, Image img) {
+        return new ImageResource(uri, AWTFSImage.createImage(img));
+    }
 
-	 * @param uri The URI for the image, resolved to an absolute URI.
-	 * @param img The image to package; may be null (for example, if image could not be loaded).
-	 *
-	 * @return An ImageResource containing the image.
-	 */
-	protected ImageResource createImageResource(String uri, Image img) {
-		return new ImageResource(uri, AWTFSImage.createImage(img));
-	}
-
-	/**
-	 * Retrieves the XML located at the given URI. It's assumed the URI does point to a XML--the URI will
-	 * be accessed (using java.io or java.net), opened, read and then passed into the XML parser (XMLReader)
-	 * configured for Flying Saucer. The result is packed up into an XMLResource for later consumption.
-	 *
-	 * @param uri Location of the XML source.
-	 * @return An XMLResource containing the image.
-	 */
+    /**
+     * Retrieves the XML located at the given URI. It's assumed the URI does point to a XML--the URI will
+     * be accessed (using java.io or java.net), opened, read and then passed into the XML parser (XMLReader)
+     * configured for Flying Saucer. The result is packed up into an XMLResource for later consumption.
+     *
+     * @param uri Location of the XML source.
+     * @return An XMLResource containing the image.
+     */
     public XMLResource getXMLResource(String uri) {
         InputStream inputStream = resolveAndOpenStream(uri);
         XMLResource xmlResource;
         try {
             xmlResource = XMLResource.load(inputStream);
         } finally {
-            if ( inputStream != null ) try {
-                inputStream.close();
-            } catch (IOException e) {
-                // swallow
+            if (inputStream != null) {
+                try {
+                    inputStream.close();
+                } catch (IOException e) {
+                    // swallow
+                }
             }
         }
         return xmlResource;
@@ -222,11 +230,12 @@ public class NaiveUserAgent implements UserAgentCallback, DocumentListener {
 
     public byte[] getBinaryResource(String uri) {
         InputStream is = resolveAndOpenStream(uri);
+        if (is==null) return null;
         try {
             ByteArrayOutputStream result = new ByteArrayOutputStream();
             byte[] buf = new byte[10240];
             int i;
-            while ( (i = is.read(buf)) != -1) {
+            while ((i = is.read(buf)) != -1) {
                 result.write(buf, 0, i);
             }
             is.close();
@@ -246,7 +255,6 @@ public class NaiveUserAgent implements UserAgentCallback, DocumentListener {
         }
     }
 
-
     /**
      * Returns true if the given URI was visited, meaning it was requested at some point since initialization.
      *
@@ -257,31 +265,34 @@ public class NaiveUserAgent implements UserAgentCallback, DocumentListener {
         return false;
     }
 
-	/**
-	 * URL relative to which URIs are resolved.
-	 *
-	 * @param url A URI which anchors other, possibly relative URIs.
-	 */
-	public void setBaseURL(String url) {
+    /**
+     * URL relative to which URIs are resolved.
+     *
+     * @param url A URI which anchors other, possibly relative URIs.
+     */
+    public void setBaseURL(String url) {
         _baseURL = url;
     }
 
-	/**
-	 * Resolves the URI; if absolute, leaves as is, if relative, returns an absolute URI based on the baseUrl for
-	 * the agent.
-	 *
-	 * @param uri A URI, possibly relative.
-	 *
-	 * @return A URI as String, resolved, or null if there was an exception (for example if the URI is malformed).
-	 */
-	public String resolveURI(String uri) {
+    /**
+     * Resolves the URI; if absolute, leaves as is, if relative, returns an absolute URI based on the baseUrl for
+     * the agent.
+     *
+     * @param uri A URI, possibly relative.
+     *
+     * @return A URI as String, resolved, or null if there was an exception (for example if the URI is malformed).
+     */
+    public String resolveURI(String uri) {
         if (uri == null) return null;
         String ret = null;
         if (_baseURL == null) {//first try to set a base URL
             try {
-                URL result = new URL(uri);
-                setBaseURL(result.toExternalForm());
-            } catch (MalformedURLException e) {
+                URI result = new URI(uri);
+                if (result.isAbsolute()) setBaseURL(result.toString());
+            } catch (URISyntaxException e) {
+                XRLog.exception("The default NaiveUserAgent could not use the URL as base url: " + uri, e);
+            }
+            if (_baseURL == null) { // still not set -> fallback to current working directory
                 try {
                     setBaseURL(new File(".").toURI().toURL().toExternalForm());
                 } catch (Exception e1) {
@@ -292,35 +303,34 @@ public class NaiveUserAgent implements UserAgentCallback, DocumentListener {
         }
         // test if the URI is valid; if not, try to assign the base url as its parent
         try {
-            return new URL(uri).toString();
-        } catch (MalformedURLException e) {
-            XRLog.load(uri + " is not a URL; may be relative. Testing using parent URL " + _baseURL);
-            try {
-                URL result = new URL(new URL(_baseURL), uri);
-                ret = result.toString();
-            } catch (MalformedURLException e1) {
-                XRLog.exception("The default NaiveUserAgent cannot resolve the URL " + uri + " with base URL " + _baseURL);
+            URI result = new URI(uri);
+            if (!result.isAbsolute()) {
+                XRLog.load(uri + " is not a URL; may be relative. Testing using parent URL " + _baseURL);
+                result=new URI(_baseURL).resolve(result);
             }
+            ret = result.toString();
+        } catch (URISyntaxException e) {
+            XRLog.exception("The default NaiveUserAgent cannot resolve the URL " + uri + " with base URL " + _baseURL);
         }
         return ret;
     }
 
-	/**
-	 * Returns the current baseUrl for this class.
-	 */
-	public String getBaseURL() {
+    /**
+     * Returns the current baseUrl for this class.
+     */
+    public String getBaseURL() {
         return _baseURL;
     }
 
-	public void documentStarted() {
-		shrinkImageCache();
-	}
+    public void documentStarted() {
+        shrinkImageCache();
+    }
 
-	public void documentLoaded() { /* ignore*/ }
+    public void documentLoaded() { /* ignore*/ }
 
-	public void onLayoutException(Throwable t) { /* ignore*/ }
+    public void onLayoutException(Throwable t) { /* ignore*/ }
 
-	public void onRenderException(Throwable t) { /* ignore*/ }
+    public void onRenderException(Throwable t) { /* ignore*/ }
 }
 
 /*
@@ -451,4 +461,3 @@ public class NaiveUserAgent implements UserAgentCallback, DocumentListener {
  *
  *
  */
-

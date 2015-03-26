@@ -45,13 +45,14 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.xhtmlrenderer.css.constants.CSSName;
 import org.xhtmlrenderer.css.constants.IdentValue;
 import org.xhtmlrenderer.css.parser.FSCMYKColor;
 import org.xhtmlrenderer.css.parser.FSColor;
@@ -63,7 +64,6 @@ import org.xhtmlrenderer.extend.FSImage;
 import org.xhtmlrenderer.extend.NamespaceHandler;
 import org.xhtmlrenderer.extend.OutputDevice;
 import org.xhtmlrenderer.layout.SharedContext;
-import org.xhtmlrenderer.pdf.ITextFontResolver;
 import org.xhtmlrenderer.pdf.ITextFontResolver.FontDescription;
 import org.xhtmlrenderer.render.AbstractOutputDevice;
 import org.xhtmlrenderer.render.BlockBox;
@@ -84,18 +84,20 @@ import com.lowagie.text.Image;
 import com.lowagie.text.pdf.CMYKColor;
 import com.lowagie.text.pdf.PdfAction;
 import com.lowagie.text.pdf.PdfAnnotation;
+import com.lowagie.text.pdf.PdfArray;
 import com.lowagie.text.pdf.PdfBorderArray;
 import com.lowagie.text.pdf.PdfBorderDictionary;
 import com.lowagie.text.pdf.PdfContentByte;
 import com.lowagie.text.pdf.PdfDestination;
-import com.lowagie.text.pdf.PdfFileSpecification;
+import com.lowagie.text.pdf.PdfDictionary;
 import com.lowagie.text.pdf.PdfImportedPage;
+import com.lowagie.text.pdf.PdfIndirectReference;
 import com.lowagie.text.pdf.PdfName;
 import com.lowagie.text.pdf.PdfOutline;
 import com.lowagie.text.pdf.PdfReader;
+import com.lowagie.text.pdf.PdfString;
 import com.lowagie.text.pdf.PdfTextArray;
 import com.lowagie.text.pdf.PdfWriter;
-import java.io.File;
 
 /**
  * This class is largely based on {@link com.lowagie.text.pdf.PdfGraphics2D}.
@@ -143,8 +145,6 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
     private List _bookmarks = new ArrayList();
 
     private List _metadata = new ArrayList();
-    
-    private List _attachments = new ArrayList(); //Document level attachments
 
     private Box _root;
 
@@ -256,95 +256,57 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
 
     private void processLink(RenderingContext c, Box box) {
         Element elem = box.getElement();
-        if (elem == null) {
-            return;
-        }
+        if (elem != null) {
+            NamespaceHandler handler = _sharedContext.getNamespaceHandler();
+            String uri = handler.getLinkUri(elem);
+            if (uri != null) {
+                if (uri.length() > 1 && uri.charAt(0) == '#') {
+                    String anchor = uri.substring(1);
+                    Box target = _sharedContext.getBoxById(anchor);
+                    if (target != null) {
+                        PdfDestination dest = createDestination(c, target);
 
-        NamespaceHandler handler = _sharedContext.getNamespaceHandler();
-        String uri = handler.getLinkUri(elem);
-        if (uri == null) { 
-            return;
-        }
+                        if (dest != null) {
+                            PdfAction action = new PdfAction();
+                            if (!"".equals(handler.getAttributeValue(elem, "onclick"))) {
+                                action = PdfAction.javaScript(handler.getAttributeValue(elem, "onclick"), _writer);
+                            } else {
+                                action.put(PdfName.S, PdfName.GOTO);
+                                action.put(PdfName.D, dest);
+                            }
 
-        String doEmbedFile = handler.getAttributeValue( elem, "data-fs-embed-file" );
-        if( "true".equals( doEmbedFile.toLowerCase() ) ) {
-            String fileName = new File( uri ).getName();
-            com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
-            if (targetArea == null) {
-                return;
-            }
+                            com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
+                            if (targetArea == null) {
+                                return;
+                            }
 
-            try {
-                if( !_attachments.contains( fileName ) ) {
-                    byte[] fileBytes = _sharedContext.getUac().getBinaryResource(uri);
-                    PdfFileSpecification fs = PdfFileSpecification.fileEmbedded( _writer, null, fileName, fileBytes );
-                    fs.addDescription( fileName, true );
+                            targetArea.setBorder(0);
+                            targetArea.setBorderWidth(0);
 
-                    _writer.addFileAttachment(fs);
-                    _attachments.add( fileName );
+                            PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
+                                    targetArea.getRight(), targetArea.getTop(), action);
+                            annot.put(PdfName.SUBTYPE, PdfName.LINK);
+                            annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
+                            annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
+                            _writer.addAnnotation(annot);
+                        }
+                    }
+                } else if (uri.indexOf("://") != -1) {
+                    PdfAction action = new PdfAction(uri);
+
+                    com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
+                    if (targetArea == null) {
+                        return;
+                    }
+                    PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(), targetArea.getRight(),
+                            targetArea.getTop(), action);
+                    annot.put(PdfName.SUBTYPE, PdfName.LINK);
+
+                    annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
+                    annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
+                    _writer.addAnnotation(annot);
                 }
-
-                targetArea.setBorder(0);
-                targetArea.setBorderWidth(0);
-
-                PdfAction action = PdfAction.javaScript(
-                    "this.exportDataObject({cName:\""+fileName+"\", nLaunch:1});",
-                    _writer
-                );
-                PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
-                        targetArea.getRight(), targetArea.getTop(), action);
-                annot.put(PdfName.SUBTYPE, PdfName.LINK);
-                annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
-                annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
-                _writer.addAnnotation(annot);
-            } catch (IOException ex) {
-                XRLog.render(Level.INFO, "Could not embed file " + fileName + " using URI " + uri );
             }
-        }
-        else if (uri.length() > 1 && uri.charAt(0) == '#') { //internal jumplink
-            String anchor = uri.substring(1);
-            Box target = _sharedContext.getBoxById(anchor);
-            if (target != null) {
-                PdfDestination dest = createDestination(c, target);
-
-                PdfAction action = new PdfAction();
-                if (!"".equals(handler.getAttributeValue(elem, "onclick"))) {
-                    action = PdfAction.javaScript(handler.getAttributeValue(elem, "onclick"), _writer);
-                } else {
-                    action.put(PdfName.S, PdfName.GOTO);
-                    action.put(PdfName.D, dest);
-                }
-
-                com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
-                if (targetArea == null) {
-                    return;
-                }
-
-                targetArea.setBorder(0);
-                targetArea.setBorderWidth(0);
-
-                PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
-                        targetArea.getRight(), targetArea.getTop(), action);
-                annot.put(PdfName.SUBTYPE, PdfName.LINK);
-                annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
-                annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
-                _writer.addAnnotation(annot);
-            }
-        }
-        else if (uri.indexOf("://") != -1) { //external link
-            PdfAction action = new PdfAction(uri);
-
-            com.lowagie.text.Rectangle targetArea = checkLinkArea(c, box);
-            if (targetArea == null) {
-                return;
-            }
-            PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(), targetArea.getRight(),
-                    targetArea.getTop(), action);
-            annot.put(PdfName.SUBTYPE, PdfName.LINK);
-
-            annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
-            annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
-            _writer.addAnnotation(annot);
         }
     }
 
@@ -395,19 +357,21 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
     }
 
     private PdfDestination createDestination(RenderingContext c, Box box) {
-        PdfDestination result;
+        PdfDestination result = null;
 
         PageBox page = _root.getLayer().getPage(c, getPageRefY(box));
-        int distanceFromTop = page.getMarginBorderPadding(c, CalculatedStyle.TOP);
-        distanceFromTop += box.getAbsY() + box.getMargin(c).top() - page.getTop();
-        result = new PdfDestination(PdfDestination.XYZ, 0, page.getHeight(c) / _dotsPerPoint - distanceFromTop / _dotsPerPoint, 0);
-        result.addPage(_writer.getPageReference(_startPageNo + page.getPageNo() + 1));
+        if (page != null) {
+            int distanceFromTop = page.getMarginBorderPadding(c, CalculatedStyle.TOP);
+            distanceFromTop += box.getAbsY() + box.getMargin(c).top() - page.getTop();
+            result = new PdfDestination(PdfDestination.XYZ, 0, page.getHeight(c) / _dotsPerPoint - distanceFromTop / _dotsPerPoint, 0);
+            result.addPage(_writer.getPageReference(_startPageNo + page.getPageNo() + 1));
+        }
 
         return result;
     }
 
-    public void drawBorderLine(Rectangle bounds, int side, int lineWidth, boolean solid) {
-        float x = bounds.x;
+    public void drawBorderLine(Shape bounds, int side, int lineWidth, boolean solid) {
+       /*( float x = bounds.x;
         float y = bounds.y;
         float w = bounds.width;
         float h = bounds.height;
@@ -435,9 +399,9 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
                 offset += 1;
             }
             line = new Line2D.Float(x + adj, y + h - offset + adj2, x + w - adj, y + h - offset + adj2);
-        }
+        }*/
 
-        draw(line);
+        draw(bounds);
     }
 
     public void setColor(FSColor color) {
@@ -452,7 +416,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
         }
     }
 
-    private void draw(Shape s) {
+    public void draw(Shape s) {
         followPath(s, STROKE);
     }
 
@@ -541,6 +505,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
         if (fontSpec != null) {
             int need = ITextFontResolver.convertWeightToInt(fontSpec.fontWeight);
             int have = desc.getWeight();
+
             if (need > have) {
                 cb.setTextRenderingMode(PdfContentByte.TEXT_RENDER_MODE_FILL_STROKE);
                 float lineWidth = fontSize * 0.04f; // 4% of font size
@@ -683,6 +648,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
                 break;
 
             case PathIterator.SEG_QUADTO:
+            	System.out.println("Quad to " + coords[0] + " " + coords[1] + " " + coords[2] + " " + coords[3]);
                 cb.curveTo(coords[0], coords[1], coords[2], coords[3]);
                 break;
             }
@@ -888,15 +854,13 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
     }
 
     private void drawPDFAsImage(PDFAsImage image, int x, int y) {
-        URL url = image.getURL();
+        URI uri = image.getURI();
         PdfReader reader = null;
 
         try {
-            reader = getReader(url);
+            reader = getReader(uri);
         } catch (IOException e) {
-            throw new XRRuntimeException("Could not load " + url + ": " + e.getMessage(), e);
-        } catch (URISyntaxException e) {
-            throw new XRRuntimeException("Could not load " + url + ": " + e.getMessage(), e);
+            throw new XRRuntimeException("Could not load " + uri + ": " + e.getMessage(), e);
         }
 
         PdfImportedPage page = getWriter().getImportedPage(reader, 1);
@@ -921,11 +885,10 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
         _currentPage.saveState();
     }
 
-    public PdfReader getReader(URL url) throws IOException, URISyntaxException {
-        URI uri = url.toURI();
+    public PdfReader getReader(URI uri) throws IOException {
         PdfReader result = (PdfReader) _readerCache.get(uri);
         if (result == null) {
-            result = new PdfReader(url);
+            result = new PdfReader(getSharedContext().getUserAgentCallback().getBinaryResource(uri.toString()));
             _readerCache.put(uri, result);
         }
         return result;
@@ -942,6 +905,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
 
     public void finish(RenderingContext c, Box root) {
         writeOutline(c, root);
+        writeNamedDestinations(c);
     }
 
     private void writeOutline(RenderingContext c, Box root) {
@@ -955,6 +919,46 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
         for (Iterator i = bookmarks.iterator(); i.hasNext();) {
             Bookmark bookmark = (Bookmark) i.next();
             writeBookmark(c, root, parent, bookmark);
+        }
+    }
+
+    private void writeNamedDestinations(RenderingContext c) {
+        Map idMap = getSharedContext().getIdMap();
+        if ((idMap != null) && (!idMap.isEmpty())) {
+            PdfArray dests = new PdfArray();
+            try {
+                Iterator it = idMap.entrySet().iterator();
+                while (it.hasNext()) {
+                    Entry entry = (Entry) it.next();
+
+                    Box targetBox = (Box) entry.getValue();
+
+                    if (targetBox.getStyle().isIdent(CSSName.FS_NAMED_DESTINATION, IdentValue.CREATE)) {
+                        String anchorName = (String) entry.getKey();
+                        dests.add(new PdfString(anchorName, PdfString.TEXT_UNICODE));
+
+                        PdfDestination dest = createDestination(c, targetBox);
+                        if (dest != null) {
+                            PdfIndirectReference ref = _writer.addToBody(dest).getIndirectReference();
+                            dests.add(ref);
+                        }
+                    }
+                }
+
+                if (!dests.isEmpty()) {
+                    PdfDictionary nametree = new PdfDictionary();
+                    nametree.put(PdfName.NAMES, dests);
+                    PdfIndirectReference nameTreeRef = _writer.addToBody(nametree).getIndirectReference();
+
+                    PdfDictionary names = new PdfDictionary();
+                    names.put(PdfName.DESTS, nameTreeRef);
+                    PdfIndirectReference destinationsRef = _writer.addToBody(names).getIndirectReference();
+
+                    _writer.getExtraCatalog().put(PdfName.NAMES, destinationsRef);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
@@ -1068,7 +1072,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
     /**
      * Appends a name/content metadata pair to this output device. A name or
      * content value of null will be ignored.
-     * 
+     *
      * @param name
      *            the name of the metadata element to add.
      * @return the content value for this metadata.
@@ -1084,7 +1088,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
      * Searches the metadata name/content pairs of the current document and
      * returns the content value from the first pair with a matching name. The
      * search is case insensitive.
-     * 
+     *
      * @param name
      *            the metadata element name to locate.
      * @return the content value of the first found metadata element; otherwise
@@ -1106,7 +1110,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
      * Searches the metadata name/content pairs of the current document and
      * returns any content values with a matching name in an ArrayList. The
      * search is case insensitive.
-     * 
+     *
      * @param name
      *            the metadata element name to locate.
      * @return an ArrayList with matching content values; otherwise an empty
@@ -1129,7 +1133,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
      * Locates and stores all metadata values in the document head that contain
      * name/content pairs. If there is no pair with a name of "title", any
      * content in the title element is saved as a "title" metadata item.
-     * 
+     *
      * @param doc
      *            the Document level node of the parsed xhtml file.
      */
@@ -1166,7 +1170,7 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
      * value of null will result in the removal of all copies of the named
      * metadata. Use <code>addMetadata</code> to append additional values with
      * the same name.
-     * 
+     *
      * @param name
      *            the metadata element name to locate.
      * @return the new content value for this metadata (null to remove all

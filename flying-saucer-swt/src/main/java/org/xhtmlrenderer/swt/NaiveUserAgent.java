@@ -21,6 +21,8 @@ package org.xhtmlrenderer.swt;
 
 import java.io.*;
 import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -32,14 +34,15 @@ import org.xhtmlrenderer.extend.UserAgentCallback;
 import org.xhtmlrenderer.resource.CSSResource;
 import org.xhtmlrenderer.resource.ImageResource;
 import org.xhtmlrenderer.resource.XMLResource;
+import org.xhtmlrenderer.util.ImageUtil;
 import org.xhtmlrenderer.util.XRLog;
 
 /**
  * Naive user agent, copy of org.xhtmlrenderer.swing.NaiveUserAgent (but
  * modified for SWT, of course).
- * 
+ *
  * @author Vianney le Clément
- * 
+ *
  */
 public class NaiveUserAgent implements UserAgentCallback {
 
@@ -48,7 +51,7 @@ public class NaiveUserAgent implements UserAgentCallback {
      */
     private int _imageCacheCapacity = 16;
     private LinkedHashMap _imageCache = new LinkedHashMap(_imageCacheCapacity,
-        0.75f, true);
+            0.75f, true);
 
     private String _baseURL;
 
@@ -63,7 +66,7 @@ public class NaiveUserAgent implements UserAgentCallback {
 
     /**
      * Gets a Reader for the resource identified
-     * 
+     *
      * @param uri PARAM
      * @return The stylesheet value
      */
@@ -82,46 +85,71 @@ public class NaiveUserAgent implements UserAgentCallback {
         }
         return is;
     }
-    
+
     public CSSResource getCSSResource(String uri) {
         return new CSSResource(getInputStream(uri));
     }
 
     public ImageResource getImageResource(String uri) {
         ImageResource ir = null;
-        uri = resolveURI(uri);
-        ir = (ImageResource) _imageCache.get(uri);
-        // TODO: check that cached image is still valid
-        if (ir == null) {
-            InputStream is = getInputStream(uri);
-            if (is != null) {
-                try {
-                    ir = new ImageResource(uri, new SWTFSImage(
-                        new Image(_device, is), this, uri));
-                    if (_imageCache.size() >= _imageCacheCapacity) {
-                        // prevent the cache from growing too big
-                        ImageResource old = (ImageResource) _imageCache
-                            .remove(_imageCache.keySet().iterator().next());
-                        ((SWTFSImage) old.getImage()).getImage().dispose();
-                    }
-                    _imageCache.put(uri, ir);
-                } catch (SWTException e) {
-                    XRLog.exception(
-                        "Can't read image file; unexpected problem for URI '"
-                                + uri + "'", e);
-                } finally {
+        if (ImageUtil.isEmbeddedBase64Image(uri)) {
+            ir = loadEmbeddedBase64ImageResource(uri);
+        } else {
+            uri = resolveURI(uri);
+            ir = (ImageResource) _imageCache.get(uri);
+            // TODO: check that cached image is still valid
+            if (ir == null) {
+                InputStream is = getInputStream(uri);
+                if (is != null) {
                     try {
-                        is.close();
-                    } catch (IOException e) {
-                        // swallow
+                        ir = createImageResource(uri, is);
+                        if (_imageCache.size() >= _imageCacheCapacity) {
+                            // prevent the cache from growing too big
+                            ImageResource old = (ImageResource) _imageCache
+                                    .remove(_imageCache.keySet().iterator().next());
+                            ((SWTFSImage) old.getImage()).getImage().dispose();
+                        }
+                        _imageCache.put(uri, ir);
+                    } catch (SWTException e) {
+                        XRLog.exception(
+                                "Can't read image file; unexpected problem for URI '"
+                                + uri + "'", e);
+                    } finally {
+                        try {
+                            is.close();
+                        } catch (IOException e) {
+                            // swallow
+                        }
                     }
                 }
             }
-        }
-        if (ir == null) {
-            ir = new ImageResource(uri, null);
+            if (ir == null) {
+                ir = new ImageResource(uri, null);
+            }
         }
         return ir;
+    }
+    
+    /**
+     * Factory method to generate ImageResources from a given Image. May be
+     * overridden in subclass.
+     *
+     * @param uri The URI for the image, resolved to an absolute URI.
+     * @param is Stream of the image; may be null (for example, if image could
+     * not be loaded).
+     *
+     * @return An ImageResource containing the image.
+     */
+    protected ImageResource createImageResource(String uri, InputStream is) {
+        return new ImageResource(uri, new SWTFSImage(new Image(_device, is), this, uri));
+    }
+    
+    private ImageResource loadEmbeddedBase64ImageResource(final String uri) {
+        byte[] image = ImageUtil.getEmbeddedBase64Image(uri);
+        if (image != null) {
+            return createImageResource(null, new ByteArrayInputStream(image));
+        }
+        return new ImageResource(null, null);
     }
 
     public XMLResource getXMLResource(String uri) {
@@ -154,7 +182,7 @@ public class NaiveUserAgent implements UserAgentCallback {
 
     /**
      * Gets the visited attribute of the NaiveUserAgent object
-     * 
+     *
      * @param uri PARAM
      * @return The visited value
      */
@@ -167,32 +195,34 @@ public class NaiveUserAgent implements UserAgentCallback {
     }
 
     public String resolveURI(String uri) {
-        if (uri == null) {
-            return null;
-        }
+        if (uri == null) return null;
         String ret = null;
-        if (_baseURL == null) {// first try to set a base URL
+        if (_baseURL == null) {//first try to set a base URL
             try {
-                URL result = new URL(uri);
-                setBaseURL(result.toExternalForm());
-            } catch (MalformedURLException e) {
+                URI result = new URI(uri);
+                if (result.isAbsolute()) setBaseURL(result.toString());
+            } catch (URISyntaxException e) {
+                XRLog.exception("The default NaiveUserAgent could not use the URL as base url: " + uri, e);
+            }
+            if (_baseURL == null) { // still not set -> fallback to current working directory
                 try {
                     setBaseURL(new File(".").toURI().toURL().toExternalForm());
                 } catch (Exception e1) {
-                    XRLog
-                        .exception("The default NaiveUserAgent doesn't know how to resolve the base URL for "
-                                + uri);
+                    XRLog.exception("The default NaiveUserAgent doesn't know how to resolve the base URL for " + uri);
                     return null;
                 }
             }
         }
+        // test if the URI is valid; if not, try to assign the base url as its parent
         try {
-            URL result = new URL(new URL(_baseURL), uri);
+            URI result = new URI(uri);
+            if (!result.isAbsolute()) {
+                XRLog.load(uri + " is not a URL; may be relative. Testing using parent URL " + _baseURL);
+                result=new URI(_baseURL).resolve(result);
+            }
             ret = result.toString();
-        } catch (MalformedURLException e1) {
-            XRLog
-                .exception("The default NaiveUserAgent cannot resolve the URL "
-                        + uri + " with base URL " + _baseURL);
+        } catch (URISyntaxException e) {
+            XRLog.exception("The default NaiveUserAgent cannot resolve the URL " + uri + " with base URL " + _baseURL);
         }
         return ret;
     }
@@ -211,19 +241,20 @@ public class NaiveUserAgent implements UserAgentCallback {
         }
         _imageCache.clear();
     }
-    
+
     public byte[] getBinaryResource(String uri) {
         InputStream is = getInputStream(uri);
+        if (is==null) return null;
         try {
             ByteArrayOutputStream result = new ByteArrayOutputStream();
             byte[] buf = new byte[10240];
             int i;
-            while ( (i = is.read(buf)) != -1) {
+            while ((i = is.read(buf)) != -1) {
                 result.write(buf, 0, i);
             }
             is.close();
             is = null;
-            
+
             return result.toByteArray();
         } catch (IOException e) {
             return null;
