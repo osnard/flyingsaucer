@@ -35,8 +35,6 @@ import java.awt.geom.PathIterator;
 import java.awt.geom.Point2D;
 import java.io.IOException;
 import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -67,7 +65,6 @@ import org.xhtmlrenderer.layout.SharedContext;
 import org.xhtmlrenderer.pdf.ITextFontResolver.FontDescription;
 import org.xhtmlrenderer.render.AbstractOutputDevice;
 import org.xhtmlrenderer.render.BlockBox;
-import org.xhtmlrenderer.render.BorderPainter;
 import org.xhtmlrenderer.render.Box;
 import org.xhtmlrenderer.render.FSFont;
 import org.xhtmlrenderer.render.InlineLayoutBox;
@@ -290,17 +287,26 @@ public class ITextOutputDevice extends AbstractOutputDevice implements OutputDev
 
                 //This only works on Adobe Acrobat Reader
                 PdfAction action = PdfAction.javaScript(
-                    "this.exportDataObject({cName:\"" + fileName + "\", nLaunch:1});",
+                    "this.exportDataObject({cName:\"" + fileName + "\", nLaunch:2});",
                     _writer
                 );
+                /*
+                HINT: https://acrobatusers.com/tutorials/importing-and-exporting-pdf-file-attachments-acrobat-javascript
+                An nLaunch value of "2" directs Acrobat to save the file
+                attachment to a temporary file and then ask the operating
+                system to open it (Acrobat doesn't know anything about
+                which programs open which file types, but the OS does). Other
+                possible values are 0 and 1. A value of "0" causes the file to
+                be saved, and a value of "1" causes the file to be opened
+                after it is saved. Both of these options will cause the
+                File Open Dialog to be displayed.
+                */
                 PdfAnnotation annot = new PdfAnnotation(_writer, targetArea.getLeft(), targetArea.getBottom(),
                         targetArea.getRight(), targetArea.getTop(), action);
-                annot.put(PdfName.SUBTYPE, PdfName.LINK);
-                annot.setBorderStyle(new PdfBorderDictionary(0.0f, 0));
-                annot.setBorder(new PdfBorderArray(0.0f, 0.0f, 0));
                 _writer.addAnnotation(annot);
-            } catch (IOException ex) {
+            } catch ( Exception ex ) {
                 XRLog.render(Level.INFO, "Could not embed file " + fileName + " using URI " + uri);
+                XRLog.render(Level.INFO, ex.getMessage());
             }
         }
         else if (uri.length() > 1 && uri.charAt(0) == '#') { //internal jumplink
